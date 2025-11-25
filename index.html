@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple Video/Audio Call</title>
+    <style>
+      :root {
+        font-family: Arial, Helvetica, sans-serif;
+        background-color: #fff;
+        color: #1f1f1f;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2rem 1rem 4rem;
+        box-sizing: border-box;
+        background-color: #fff;
+      }
+
+      h1 {
+        margin-bottom: 1rem;
+        text-align: center;
+      }
+
+      .card {
+        width: 100%;
+        max-width: 960px;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .controls,
+      .call-actions,
+      .video-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+
+      .controls {
+        justify-content: center;
+      }
+
+      .call-actions {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .call-actions input {
+        padding: 0.65rem;
+        border-radius: 6px;
+        border: 1px solid #b7b7b7;
+        width: 100%;
+        max-width: 280px;
+        font-size: 1rem;
+      }
+
+      button {
+        padding: 0.65rem 1.25rem;
+        border: none;
+        border-radius: 999px;
+        font-size: 1rem;
+        cursor: pointer;
+        background-color: #1f7ae0;
+        color: #fff;
+        transition: opacity 0.2s ease;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      button:hover:not(:disabled) {
+        opacity: 0.85;
+      }
+
+      .end-btn {
+        background-color: #e02d2d;
+      }
+
+      .video-grid {
+        justify-content: center;
+      }
+
+      video {
+        width: 100%;
+        max-width: 440px;
+        aspect-ratio: 16 / 9;
+        background-color: #e9eef5;
+        border-radius: 12px;
+        object-fit: cover;
+      }
+
+      .status {
+        text-align: center;
+        font-size: 0.95rem;
+        color: #333;
+        min-height: 1.5rem;
+      }
+
+      @media (min-width: 700px) {
+        .call-actions {
+          flex-direction: row;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .call-actions input {
+          max-width: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Simple Video/Audio Call</h1>
+
+      <div class="controls">
+        <button id="startVideoBtn">Start Video Call</button>
+        <button id="startAudioBtn">Start Audio Call</button>
+      </div>
+
+      <div class="call-actions">
+        <input
+          id="roomInput"
+          type="text"
+          placeholder="Room Code"
+          aria-label="Room Code"
+        />
+        <button id="joinBtn">Join</button>
+      </div>
+
+      <div class="video-grid">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+
+      <div class="controls">
+        <button id="muteBtn" disabled>Mute</button>
+        <button id="cameraBtn" disabled>Camera Off</button>
+        <button id="endBtn" class="end-btn" disabled>End Call</button>
+      </div>
+
+      <div class="status" id="statusText">Ready when you are.</div>
+    </div>
+
+    <script src="https://unpkg.com/simple-peer@latest/simplepeer.min.js"></script>
+    <script>
+      const startVideoBtn = document.getElementById("startVideoBtn");
+      const startAudioBtn = document.getElementById("startAudioBtn");
+      const joinBtn = document.getElementById("joinBtn");
+      const muteBtn = document.getElementById("muteBtn");
+      const cameraBtn = document.getElementById("cameraBtn");
+      const endBtn = document.getElementById("endBtn");
+      const statusText = document.getElementById("statusText");
+      const localVideo = document.getElementById("localVideo");
+      const remoteVideo = document.getElementById("remoteVideo");
+      const roomInput = document.getElementById("roomInput");
+
+      let localStream = null;
+      let currentPeer = null;
+      let audioOnly = false;
+
+      const setStatus = (text) => {
+        statusText.textContent = text;
+      };
+
+      const toggleCallControls = (enabled) => {
+        muteBtn.disabled = !enabled;
+        cameraBtn.disabled = !enabled;
+        endBtn.disabled = !enabled;
+      };
+
+      const cleanupStreams = () => {
+        if (localStream) {
+          localStream.getTracks().forEach((track) => track.stop());
+          localStream = null;
+        }
+        localVideo.srcObject = null;
+        remoteVideo.srcObject = null;
+      };
+
+      const endCall = () => {
+        if (currentPeer) {
+          currentPeer.destroy();
+          currentPeer = null;
+        }
+        cleanupStreams();
+        toggleCallControls(false);
+        setStatus("Call ended. Ready when you are.");
+      };
+
+      const configureButtonsWhileCalling = (isCalling) => {
+        startVideoBtn.disabled = isCalling;
+        startAudioBtn.disabled = isCalling;
+        joinBtn.disabled = isCalling;
+        roomInput.disabled = isCalling;
+      };
+
+      const attachStreamEvents = () => {
+        if (!localStream) return;
+        localVideo.srcObject = localStream;
+
+        muteBtn.textContent = "Mute";
+        cameraBtn.textContent = audioOnly ? "Camera Off" : "Camera Off";
+
+        muteBtn.onclick = () => {
+          const audioTracks = localStream.getAudioTracks();
+          if (!audioTracks.length) return;
+          const enabled = audioTracks[0].enabled;
+          audioTracks[0].enabled = !enabled;
+          muteBtn.textContent = enabled ? "Unmute" : "Mute";
+        };
+
+        cameraBtn.onclick = () => {
+          const videoTracks = localStream.getVideoTracks();
+          if (!videoTracks.length) {
+            alert("No camera track in this call.");
+            return;
+          }
+          const enabled = videoTracks[0].enabled;
+          videoTracks[0].enabled = !enabled;
+          cameraBtn.textContent = enabled ? "Camera On" : "Camera Off";
+        };
+      };
+
+      const startPeer = async (options) => {
+        audioOnly = options.audioOnly;
+        configureButtonsWhileCalling(true);
+        toggleCallControls(false);
+        setStatus("Requesting media...");
+
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: audioOnly ? false : true,
+          });
+        } catch (err) {
+          console.error(err);
+          setStatus("Media permission denied.");
+          configureButtonsWhileCalling(false);
+          return;
+        }
+
+        attachStreamEvents();
+
+        const peer = new SimplePeer({
+          initiator: options.initiator,
+          trickle: false,
+          stream: localStream,
+        });
+
+        currentPeer = peer;
+        toggleCallControls(true);
+        endBtn.onclick = endCall;
+
+        peer.on("signal", (data) => {
+          const signalText = JSON.stringify(data);
+          const label = options.initiator
+            ? "Send this signal to your friend via any chat:"
+            : "Send this answer back to your friend:";
+          setStatus("Signal ready. Share it manually.");
+          window.prompt(label, signalText);
+        });
+
+        peer.on("stream", (stream) => {
+          remoteVideo.srcObject = stream;
+          setStatus("Connected! Enjoy your call.");
+        });
+
+        peer.on("connect", () => {
+          setStatus("Peer connection established.");
+        });
+
+        peer.on("error", (err) => {
+          console.error(err);
+          setStatus("Something went wrong. Check console.");
+        });
+
+        peer.on("close", () => {
+          setStatus("Peer disconnected.");
+          endCall();
+        });
+
+        if (!options.initiator) {
+          const incoming = window.prompt(
+            "Paste the signal you received from your friend:"
+          );
+          if (incoming) {
+            peer.signal(JSON.parse(incoming));
+            setStatus("Answer created. Share it back.");
+          } else {
+            setStatus("No signal provided. Ending call.");
+            endCall();
+          }
+        }
+      };
+
+      startVideoBtn.addEventListener("click", () =>
+        startPeer({ initiator: true, audioOnly: false })
+      );
+
+      startAudioBtn.addEventListener("click", () =>
+        startPeer({ initiator: true, audioOnly: true })
+      );
+
+      joinBtn.addEventListener("click", () => {
+        if (!roomInput.value.trim()) {
+          alert("Please enter a room code to join.");
+          return;
+        }
+        startPeer({ initiator: false, audioOnly: false });
+      });
+    </script>
+  </body>
+</html>
+
