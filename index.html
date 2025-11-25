@@ -251,16 +251,22 @@
 
         attachStreamEvents();
 
-        const peer = new SimplePeer({
-        initiator: options.initiator,
-        trickle: false,
-        stream: localStream,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" }
-          ]
-         }
-        });
+       const peer = new SimplePeer({
+  initiator: options.initiator,
+  trickle: false,
+  stream: localStream,
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "openai",
+        credential: "openai"
+      }
+    ]
+  }
+});
+
 
 
         currentPeer = peer;
@@ -327,5 +333,6 @@
     </script>
   </body>
 </html>
+
 
 
